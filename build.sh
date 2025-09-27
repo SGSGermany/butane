@@ -61,6 +61,11 @@ cp "$BUTANE_TMP/butane" "$MOUNT/usr/local/bin/butane"
 cmd buildah run "$CONTAINER" -- \
     chmod +x /usr/local/bin/butane
 
+echo + "VERSION=\"\$(buildah run $(quote "$CONTAINER") -- butane --version | sed -ne '1{s/^Butane \(.*\)$/\1/p}')\"" >&2
+BUTANE_VERSION="$(buildah run "$CONTAINER" -- butane --version | sed -ne '1{s/^Butane \(.*\)$/\1/p}')"
+
+BUTANE_HASH="$(git_latest_commit "$BUTANE_GIT_REPO" "refs/tags/v$BUTANE_VERSION")"
+
 # download and install `mbutane`
 pkg_install "$CONTAINER" --virtual .mbutane-run-deps \
     python3
@@ -83,6 +88,12 @@ git_clone "$MBUTANE_GIT_REPO" "$MBUTANE_GIT_REF" "$MOUNT/usr/src/mbutane" "…/u
 cmd buildah run  "$CONTAINER" -- \
     pip install --user "/usr/src/mbutane/"
 
+echo + "VERSION=\"\$(buildah run $(quote "$CONTAINER") -- mbutane --version | sed -ne '1{s/^mbutane \(.*\)$/\1/p}')\"" >&2
+MBUTANE_VERSION="$(buildah run "$CONTAINER" -- mbutane --version | sed -ne '1{s/^mbutane \(.*\)$/\1/p}')"
+
+echo + "COMMIT=\"\$(git -C …/usr/src/mbutane rev-parse HEAD)\"" >&2
+MBUTANE_HASH="$(git -C "$MOUNT/usr/src/mbutane" rev-parse HEAD)"
+
 pkg_remove "$CONTAINER" \
     .mbutane-fetch-deps
 
@@ -93,19 +104,15 @@ echo + "rm -rf …/usr/src/mbutane" >&2
 rm -rf "$MOUNT/usr/src/mbutane"
 
 # finalize image
-echo + "BUTANE_VERSION=\"\$(buildah run $(quote "$CONTAINER") -- butane --version | sed -ne '1{s/^Butane \(.*\)$/\1/p}')\"" >&2
-BUTANE_VERSION="$(buildah run "$CONTAINER" -- butane --version | sed -ne '1{s/^Butane \(.*\)$/\1/p}')"
-
-echo + "MBUTANE_VERSION=\"\$(buildah run $(quote "$CONTAINER") -- mbutane --version | sed -ne '1{s/^mbutane \(.*\)$/\1/p}')\"" >&2
-MBUTANE_VERSION="$(buildah run "$CONTAINER" -- mbutane --version | sed -ne '1{s/^mbutane \(.*\)$/\1/p}')"
-
 cleanup "$CONTAINER"
 
 con_cleanup "$CONTAINER"
 
 cmd buildah config \
     --env BUTANE_VERSION="$BUTANE_VERSION" \
+    --env BUTANE_HASH="$BUTANE_HASH" \
     --env MBUTANE_VERSION="$MBUTANE_VERSION" \
+    --env MBUTANE_HASH="$MBUTANE_HASH" \
     "$CONTAINER"
 
 cmd buildah config \

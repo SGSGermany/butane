@@ -31,8 +31,12 @@ if [ $# -gt 0 ] && [[ "$1" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
 fi
 
 # get latest Butane version
-GITHUB_REPO_IDENT="${BUTANE_GIT_REPO#https://github.com/}"
-VERSION="$(github_latest "$GITHUB_REPO_IDENT")"
+if [[ ! "$BUTANE_GIT_REPO" =~ ^https://github\.com/([^/]+/[^/]+)\.git$ ]]; then
+    echo "Failed to extract GitHub repo slug from Git repo URL: $BUTANE_GIT_REPO" >&2
+    exit 1
+fi
+
+VERSION="$(github_latest "${BASH_REMATCH[1]}")"
 
 if [ -z "$VERSION" ]; then
     echo "Unable to read Butane version from GitHub API" >&2
