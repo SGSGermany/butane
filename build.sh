@@ -56,7 +56,7 @@ cmd buildah run \
     --env CGO_ENABLED=0 --env GOARCH=amd64 --env GOOS=linux --env GOFLAGS="-mod=vendor" \
     "$CONTAINER" -- \
         go build \
-            -ldflags "-w -X $(printf '%s=%q' "github.com/coreos/butane/internal/version.Raw" "$BUTANE_VERSION")" \
+            -ldflags "-w$(printf ' -X %s=%q' "github.com/coreos/butane/internal/version.Raw" "v$BUTANE_VERSION")" \
             -a -v -x \
             -o "/usr/local/bin/butane" \
             "internal/main.go"
