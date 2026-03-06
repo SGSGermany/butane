@@ -10,8 +10,6 @@
 # SPDX-License-Identifier: MIT
 # License-Filename: LICENSE
 
-ROOT_HINTS="https://www.internic.net/domain/named.cache"
-
 set -eu -o pipefail
 export LC_ALL=C.UTF-8
 
@@ -22,11 +20,10 @@ export LC_ALL=C.UTF-8
     || { echo "Invalid build environment: Environment variable 'CI_TOOLS_PATH' not set or invalid" >&2; exit 1; }
 
 source "$CI_TOOLS_PATH/helper/common.sh.inc"
-source "$CI_TOOLS_PATH/helper/common-traps.sh.inc"
 source "$CI_TOOLS_PATH/helper/container.sh.inc"
 source "$CI_TOOLS_PATH/helper/container-alpine.sh.inc"
 source "$CI_TOOLS_PATH/helper/git.sh.inc"
-source "$CI_TOOLS_PATH/helper/gpg.sh.inc"
+source "$CI_TOOLS_PATH/helper/github.sh.inc"
 
 BUILD_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$BUILD_DIR/container.env"
@@ -42,29 +39,39 @@ MOUNT="$(buildah mount "$CONTAINER")"
 echo + "rsync -v -rl --exclude .gitignore ./src/ …/" >&2
 rsync -v -rl --exclude '.gitignore' "$BUILD_DIR/src/" "$MOUNT/"
 
-# download and install `butane`
-echo + "BUTANE_TMP=\"\$(mktemp -d)\"" >&2
-BUTANE_TMP="$(mktemp -d)"
-trap_exit rm -rf "$BUTANE_TMP"
+# build and install `butane`
+git_clone "$BUTANE_GIT_REPO" "$BUTANE_GIT_REF" "$MOUNT/usr/src/butane" "…/usr/src/butane"
 
-cmd curl -sSL -f -o "$BUTANE_TMP/butane" "$BUTANE_BINARY_URL"
+echo + "BUTANE_VERSION=\"\${VERSION:-0.0.0}\"" >&2
+BUTANE_VERSION="${VERSION:-0.0.0}"
 
-cmd curl -sSL -f -o "$BUTANE_TMP/butane.asc" "$BUTANE_SIGNATURE_URL"
+echo + "BUTANE_HASH=\"\$(git -C …/usr/src/butane rev-parse HEAD)\"" >&2
+BUTANE_HASH="$(git -C "$MOUNT/usr/src/butane" rev-parse HEAD)"
 
-cmd curl -sSL -f -o "$BUTANE_TMP/fedora.gpg" "$BUTANE_KEYRING_URL"
+pkg_install "$CONTAINER" --virtual .butane-build-deps@community \
+    go
 
-gpg_verify "$BUTANE_TMP/butane" "$BUTANE_TMP/butane.asc" "$BUTANE_TMP/fedora.gpg"
-
-echo + "cp $(quote "$BUTANE_TMP/butane") …/usr/local/bin/butane" >&2
-cp "$BUTANE_TMP/butane" "$MOUNT/usr/local/bin/butane"
+cmd buildah run \
+    --workingdir  "/usr/src/butane" \
+    --env CGO_ENABLED=0 --env GOARCH=amd64 --env GOOS=linux --env GOFLAGS="-mod=vendor" \
+    "$CONTAINER" -- \
+        go build \
+            -ldflags "-w -X $(printf '%s=%q' "github.com/coreos/butane/internal/version.Raw" "$BUTANE_VERSION")" \
+            -a -v -x \
+            -o "/usr/local/bin/butane" \
+            "internal/main.go"
 
 cmd buildah run "$CONTAINER" -- \
     chmod +x /usr/local/bin/butane
 
-echo + "VERSION=\"\$(buildah run $(quote "$CONTAINER") -- butane --version | sed -ne '1{s/^Butane \(.*\)$/\1/p}')\"" >&2
-BUTANE_VERSION="$(buildah run "$CONTAINER" -- butane --version | sed -ne '1{s/^Butane \(.*\)$/\1/p}')"
+pkg_remove "$CONTAINER" \
+    .butane-build-deps
 
-BUTANE_HASH="$(git_latest_commit "$BUTANE_GIT_REPO" "refs/tags/v$BUTANE_VERSION")"
+echo + "rm -rf …/root/.cache/go-build" >&2
+rm -rf "$MOUNT/root/.cache/go-build"
+
+echo + "rm -rf …/usr/src/mbutane" >&2
+rm -rf "$MOUNT/usr/src/butane"
 
 # download and install `mbutane`
 pkg_install "$CONTAINER" --virtual .mbutane-run-deps \
@@ -88,10 +95,10 @@ git_clone "$MBUTANE_GIT_REPO" "$MBUTANE_GIT_REF" "$MOUNT/usr/src/mbutane" "…/u
 cmd buildah run  "$CONTAINER" -- \
     pip install --user "/usr/src/mbutane/"
 
-echo + "VERSION=\"\$(buildah run $(quote "$CONTAINER") -- mbutane --version | sed -ne '1{s/^mbutane \(.*\)$/\1/p}')\"" >&2
+echo + "MBUTANE_VERSION=\"\$(buildah run $(quote "$CONTAINER") -- mbutane --version | sed -ne '1{s/^mbutane \(.*\)$/\1/p}')\"" >&2
 MBUTANE_VERSION="$(buildah run "$CONTAINER" -- mbutane --version | sed -ne '1{s/^mbutane \(.*\)$/\1/p}')"
 
-echo + "COMMIT=\"\$(git -C …/usr/src/mbutane rev-parse HEAD)\"" >&2
+echo + "MBUTANE_HASH=\"\$(git -C …/usr/src/mbutane rev-parse HEAD)\"" >&2
 MBUTANE_HASH="$(git -C "$MOUNT/usr/src/mbutane" rev-parse HEAD)"
 
 pkg_remove "$CONTAINER" \
